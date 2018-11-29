@@ -1,0 +1,13 @@
+interface BigButton extends XYMouseObject {
+	
+	BigButton(char text[])
+	
+	void setSize(int w, int h)
+	
+	void setColor(Color c)
+	
+	void setActiveColor(Color c)
+	
+	void setActive(bool b)
+	
+	}

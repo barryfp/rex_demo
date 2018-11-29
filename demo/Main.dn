@@ -1,0 +1,413 @@
+//NOTE: upgrade the "x-scroll" feature to avoid issues of dropping off the end of the scrollable area...(maybe for now just reset the graph??...or just give the appearance of scrolling infinitely without actually doing it...)
+//ALSO: consider some kind of "unchanged graphics caching" to avoid the performance hit of multiple graphs, and all the text labels...
+//BUG: we don't re-render the window contents for a full-screen window that gets alt-tabbed away and back??
+
+uses events.EventData
+uses data.String
+
+const char DEFAULT_SERVER_IP[] = "192.168.1.2"
+//const char DEFAULT_SERVER_IP[] = "localhost"
+const int DEFAULT_SERVER_PORT = 8008
+
+const int ENV_WIDTH = 45
+const int BBL_WIDTH = 45
+
+const int TOP_HEIGHT = 25
+
+const int DATA_REFRESH_PERIOD = 1100
+
+const dec DEFAULT_METRIC_YMAX = 8.0
+const dec DEFAULT_METRIC_XMAX = 15.0
+
+data EnvMap {
+	char name[]
+	}
+
+component provides App requires io.Output out, data.IntUtil iu, data.DecUtil du, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ui.BigLabel {
+	
+	bool testMode// = true
+	
+	Window window
+	
+	Button closeButton
+	
+	Panel graphsPanel
+	
+	Graph graphs[]
+	Label graphNumbers[]
+	dec lastX[]
+	int rgraph
+	
+	Graph envGraph
+	EnvMap envSeries[]
+	dec envLastX
+	dec envMaxY
+	
+	Panel componentsPanel
+	Label comList[]
+	
+	BigLabel statusLabel
+	
+	RestAPI restAPI
+	String configs[]
+	
+	Color graphBackgroundOff = new Color(200, 200, 200, 255)
+	Color graphBackgroundOver = new Color(200, 200, 250, 255)
+	Color graphBackgroundActive = new Color(200, 250, 200, 255)
+	
+	//this loop just updates the graphs with the latest data, using getPerception
+	void timeLoop()
+		{
+		while (true)
+			{
+			timer.sleep(DATA_REFRESH_PERIOD)
+			
+			//int rgraph = random.get(graphs.arrayLength)
+			
+			// data format: {"metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}], "events" : [{"name" : "text", "source" : "", "value" : 20175652, "count" : 5212, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]}
+			
+			JSONElement doc
+			JSONElement se
+			
+			if (!testMode)
+				{
+				HTTPResponse r = request.get("http://$DEFAULT_SERVER_IP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
+				char response[] = r.content
+				
+				doc = parser.parseDocument(response)
+				}
+			
+			dec y
+			
+			if (testMode)
+				{
+				y = random.get(5)
+				}
+				else
+				{
+				if ((se = parser.getValue(doc, "metrics")) != null)
+					{
+					dec vk = iu.intFromString(parser.getValue(se.children[0], "value").value)
+					dec vt = iu.intFromString(parser.getValue(se.children[0], "count").value)
+					
+					dec avg = vk / vt
+					
+					y = avg
+					
+					//out.println("metric: $(du.decToString(y))")
+					}
+				}
+			
+			lastX[rgraph] += 0.5
+			graphs[rgraph].addPoint(0, lastX[rgraph], y)
+			
+			//environment graph
+			if (!testMode && (se = parser.getValue(doc, "events")) != null)
+				{
+				envLastX += 0.5
+				
+				for (int i = 0; i < se.children.arrayLength; i ++)
+					{
+					char name[] = parser.getValue(se.children[i], "name").value
+					bool found = false
+					int seriesID = 0
+					
+					//get series ID; if it doesn't exist, create a new series with its own colour
+					for (int j = 0; j < envSeries.arrayLength; j ++)
+						{
+						if (envSeries[j].name == name)
+							{
+							seriesID = j
+							found = true
+							break
+							}
+						}
+					
+					if (!found)
+						{
+						envSeries = new EnvMap[](envSeries, new EnvMap(name))
+						seriesID = envSeries.arrayLength - 1
+						envGraph.addSeries(seriesID, new Color(random.get(100), random.get(100), random.get(100), 255))
+						}
+					
+					dec vk = iu.intFromString(parser.getValue(se.children[i], "value").value)
+					dec vt = iu.intFromString(parser.getValue(se.children[i], "count").value)
+					
+					dec avg = vk / vt
+					
+					if (avg > envMaxY)
+						{
+						envMaxY = avg + 1.0
+						envGraph.setAxes(150.0, envMaxY)
+						}
+					
+					//render on EnvGraph, using the correct series ID
+					
+					//out.println("env-$name: $(du.decToString(avg)) -- $(du.decToString(vk)) : $(du.decToString(vt)) -- $(iu.intToString(seriesID))")
+					
+					envGraph.addPoint(seriesID, envLastX, avg)
+					}
+				}
+			}
+		}
+	
+	//handling user input events
+	eventsink UIEvents(EventData ed)
+		{
+		if (ed.source == closeButton && ed.type == Button.[click])
+			{
+			window.close()
+			}
+			else if (ed.type == Graph.[click])
+			{
+			for (int i = 0; i < graphs.arrayLength; i++)
+				{
+				if (graphs[i] === ed.source)
+					{
+					statusLabel.setVisible(true)
+					
+					if (!testMode) restAPI.setConfig(configs[i].string)
+					
+					statusLabel.setVisible(false)
+					
+					graphs[rgraph].setBackground(graphBackgroundOff)
+					graphs[rgraph].setHighlight(graphBackgroundOver)
+					
+					graphs[i].setBackground(graphBackgroundActive)
+					graphs[i].setHighlight(graphBackgroundActive)
+					
+					rgraph = i
+					
+					loadComponents(window)
+					
+					return
+					}
+				}
+			}
+		}
+	
+	void loadGraphs(Window w)
+		{
+		int graphCount = configs.arrayLength
+		int windowWidth = w.getSize().width
+		int windowHeight = w.getSize().height
+		
+		Label l = new Label("environment", "SourceSansPro.ttf", 40)
+		l.setPosition(50, 20)
+		l.setColor(new Color(255, 255, 255, 255))
+		w.addObject(l)
+		
+		l = new Label("current behaviour blocks", "SourceSansPro.ttf", 40)
+		l.setPosition(((windowWidth * ENV_WIDTH) / 100) + 50 + 50, 20)
+		l.setColor(new Color(255, 255, 255, 255))
+		w.addObject(l)
+		
+		l = new Label("reward / cost", "SourceSansPro.ttf", 40)
+		l.setPosition(50, ((windowHeight * TOP_HEIGHT) / 100) + 100)
+		l.setColor(new Color(255, 255, 255, 255))
+		w.addObject(l)
+		
+		statusLabel = new BigLabel("waiting for clean perception trace", "SourceSansPro.ttf", 20)
+		statusLabel.setPosition(l.getPreferredSize().width + 90, ((windowHeight * TOP_HEIGHT) / 100) + 115)
+		statusLabel.setSize((windowWidth * 80) / 100, 30)
+		statusLabel.setBackground(new Color(110, 160, 110, 255))
+		statusLabel.setColor(new Color(255, 255, 255, 255))
+		//statusLabel.setVisible(true)
+		statusLabel.setAlign(BigLabel.ALIGN_CENTER)
+		w.addObject(statusLabel)
+		
+		envGraph = new Graph()
+		envGraph.setSize((windowWidth * ENV_WIDTH) / 100, (windowHeight * TOP_HEIGHT) / 100)
+		envGraph.setPosition(50, 80)
+		
+		envGraph.setBackground(graphBackgroundOff)
+		envGraph.setHighlight(graphBackgroundOff)
+		
+		envGraph.setAxes(150.0, 10000.0)
+		envMaxY = 10000.0
+		
+		w.addObject(envGraph)
+		
+		int GRAPH_PAD = 20
+		int GRAPH_WIDTH = (windowHeight * 12) / 100
+		int GRAPH_HEIGHT = GRAPH_WIDTH
+		int nextX = 50
+		int nextY = ((windowHeight * TOP_HEIGHT) / 100) + 160
+		
+		for (int i = 0; i < graphCount; i++)
+			{
+			Graph g = new Graph()
+			g.setSize(GRAPH_WIDTH, GRAPH_HEIGHT)
+			
+			g.setPosition(nextX, nextY)
+			g.setAxes(DEFAULT_METRIC_XMAX, DEFAULT_METRIC_YMAX)
+			
+			l = new Label(iu.intToString(i+1), "SourceSansPro.ttf", 22)
+			l.setPosition(nextX + GRAPH_WIDTH - 25, nextY + 2)
+			l.setColor(new Color(100, 100, 100, 255))
+			
+			nextX += GRAPH_WIDTH + GRAPH_PAD
+			
+			if (nextX + GRAPH_WIDTH > windowWidth)
+				{
+				nextX = 50
+				
+				nextY += GRAPH_HEIGHT + GRAPH_PAD
+				}
+			
+			w.addObject(g)
+			
+			g.addSeries(0, new Color(0, 0, 255, 255))
+			
+			sinkevent UIEvents(g)
+			
+			graphs = new Graph[](graphs, g)
+			
+			graphNumbers = new Label[](graphNumbers, l)
+			
+			w.addObject(l)
+			
+			lastX = new dec[](lastX, 0.0)
+			}
+		
+		graphs[rgraph].setBackground(graphBackgroundActive)
+		graphs[rgraph].setHighlight(graphBackgroundActive)
+		}
+	
+	void loadComponents(Window w)
+		{
+		int windowWidth = w.getSize().width
+		int windowHeight = w.getSize().height
+		
+		if (componentsPanel == null)
+			{
+			componentsPanel = new Panel()
+			componentsPanel.setPosition(((windowWidth * ENV_WIDTH) / 100) + 50 + 50, 80)
+			componentsPanel.setSize(((windowWidth * BBL_WIDTH) / 100), (windowHeight * TOP_HEIGHT) / 100)
+			
+			w.addObject(componentsPanel)
+			}
+		
+		for (int i = 0; i < comList.arrayLength; i++)
+			{
+			componentsPanel.remObject(comList[i])
+			}
+		comList = null
+		
+		String cs[]
+		
+		if (testMode)
+			{
+			cs = new String[](new String("com A"), new String("com B"), new String("com C"), new String("com D"), new String("com E"), new String("com F"), new String("com G"), new String("com H"), new String("com I"), new String("com J"), new String("com K"), new String("com L"), new String("com M"), new String("com N"), new String("com O"), new String("com P"))
+			}
+			else
+			{
+			String parts[] = stringUtil.explode(configs[rgraph].string, "|")
+			parts = stringUtil.explode(parts[0].string, ",")
+			
+			for (int i = 0; i < parts.arrayLength; i++)
+				{
+				String sq[] = stringUtil.explode(parts[i].string, "/")
+				cs = new String[](cs, sq[sq.arrayLength-1])
+				}
+			}
+		
+		int ny = 10
+		int nx = 10
+		int highWidth = 0
+		
+		for (int i = 0; i < cs.arrayLength; i++)
+			{
+			Label nl = new Label(cs[i].string, "LiberationMono.ttf", 20)
+			nl.setPosition(nx, ny)
+			ny += 24
+			comList = new Label[](comList, nl)
+			componentsPanel.addObject(nl)
+			
+			int q = nl.getPreferredSize().width
+			if (q > highWidth) highWidth = q
+			
+			if (ny + 24 > componentsPanel.getSize().height)
+				{
+				nx += highWidth + 80
+				ny = 10
+				highWidth = 0
+				}
+			}
+		}
+	
+	int getCurrentConfig()
+		{
+		char cc[] = restAPI.getConfig()
+		
+		JSONElement doc = parser.parseDocument(cc)
+		cc = parser.getValue(doc, "config").value
+		
+		for (int i = 0; i < configs.arrayLength; i++)
+			{
+			if (cc == configs[i].string)
+				{
+				graphs[rgraph].setBackground(graphBackgroundOff)
+				graphs[rgraph].setHighlight(graphBackgroundOver)
+				
+				graphs[i].setBackground(graphBackgroundActive)
+				graphs[i].setHighlight(graphBackgroundActive)
+				
+				return i
+				}
+			}
+		
+		return 0
+		}
+	
+	int App:main(AppParam params[])
+		{
+		window = new Window("PAL Command")
+		
+		window.setFullScreen(true)
+		window.setBackground(new Color(70, 71, 70, 255))
+		
+		closeButton = new Button("Exit")
+		closeButton.setPosition(window.getSize().width - 60, 10)
+		sinkevent UIEvents(closeButton)
+		window.addObject(closeButton)
+		
+		if (!testMode)
+			{
+			restAPI = new RestAPI(DEFAULT_SERVER_IP, DEFAULT_SERVER_PORT)
+			
+			if (restAPI == null)
+				{
+				throw new Exception("failed to connect to REST service")
+				}
+			
+			configs = restAPI.getConfigs()
+			
+			if (configs == null)
+				{
+				throw new Exception("failed to connect to REST service")
+				}
+			}
+			else
+			{
+			configs = new String[40]
+			}
+		
+		loadGraphs(window)
+		
+		if (!testMode)
+			{
+			rgraph = getCurrentConfig()
+			}
+		
+		loadComponents(window)
+		
+		asynch::timeLoop()
+		
+		window.setVisible(true)
+		window.waitForClose()
+		
+		return 0
+		}
+	
+	}

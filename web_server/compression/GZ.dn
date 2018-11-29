@@ -1,0 +1,29 @@
+const char debugMSG[] = "[@GZIP]"
+
+component provides compression.Compression requires io.Output out, data.IntUtil iu, os.Run run {
+
+	char[] Compression:compressResource(char resource[]) {
+		//out.println("$(debugMSG) Compressing...");
+		char newName[]
+
+		char osCommand[] = new char[]("gzip -k -f ", resource)
+		RunStatus rS = run.execute(osCommand)
+
+		if (rS.executed) {
+			newName = new char[](resource, ".gz")
+			return newName
+		}
+
+		return ""
+	}
+
+	char[] Compression:algorithmName() {
+		return "gzip"
+	}
+
+	char[] Compression:getExtension() {
+		return ".gz"
+	}
+
+}
+

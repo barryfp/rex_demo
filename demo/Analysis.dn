@@ -1,0 +1,176 @@
+const char DEFAULT_SERVER_IP[] = "192.168.1.2"
+//const char DEFAULT_SERVER_IP[] = "localhost"
+const int DEFAULT_SERVER_PORT = 8008
+
+const char SERVER_ADDRESS[] = "192.168.1.2"
+const int SERVER_PORT = 8080
+
+const int RECV_BUF_SIZE = 512
+
+//how long a test runs for
+const int TEST_WINDOW = 5000
+
+//interval between requests during test
+const int WORK_RATE = 50
+
+//interval between tests of different compositions
+const int TEST_INTERVAL = 1000
+
+component provides App requires io.Output out, io.File, pal.control.RestAPI, time.Timer timer, time.Calendar cal, time.DateUtil dateUtil, net.TCPSocket, data.StringUtil stringUtil, data.DecUtil du {
+	
+	RestAPI restAPI
+	String configs[]
+	
+	String currentWorkload[]
+	
+	char outFile[] = "output.txt"
+	File outFD
+	
+	Thread worker
+	
+	bool active
+	
+	int total
+	int count
+	
+	void makeRequest(char path[])
+		{
+		char req[] = new char[]("GET ", path, " HTTP/1.1\r\n\r\n")
+		
+		TCPSocket s = new TCPSocket()
+		
+		DateTime sTime = cal.getTime()
+		
+		if (s.connect(SERVER_ADDRESS, SERVER_PORT))
+			{
+			s.send(req)
+			
+			int totalReceived = 0
+			byte resp[]
+			while ((resp = s.recv(RECV_BUF_SIZE)).arrayLength > 0)
+				{
+				totalReceived += resp.arrayLength
+				}
+			
+			s.disconnect()
+			
+			DateTime eTime = cal.getTime()
+			
+			int ms = dateUtil.toMilliseconds(dateUtil.diff(sTime, eTime))
+			
+			total += ms
+			count ++
+			}
+		}
+	
+	void workThread()
+		{
+		int ndx
+		
+		while (active)
+			{
+			makeRequest(currentWorkload[ndx].string)
+			
+			ndx ++
+			
+			if (ndx >= currentWorkload.arrayLength)
+				{
+				ndx = 0
+				}
+			
+			timer.sleep(WORK_RATE)
+			}
+		}
+	
+	void testConfig(char cid[])
+		{
+		restAPI.setConfig(cid)
+		
+		total = 0
+		count = 0
+		active = true
+		
+		worker = asynch::workThread()
+		
+		timer.sleep(TEST_WINDOW)
+		
+		active = false
+		
+		worker.join()
+		
+		char flavour[] = "plain"
+		
+		if (stringUtil.find(cid, "HTTPHandlerCGZ") != StringUtil.NOT_FOUND)
+			flavour = "CoCa"
+			else if (stringUtil.find(cid, "HTTPHandlerC") != StringUtil.NOT_FOUND)
+			flavour = "Ca"
+			else if (stringUtil.find(cid, "HTTPHandlerGZ") != StringUtil.NOT_FOUND)
+			flavour = "Co"
+		
+		PerceptionData pd = restAPI.getPerception()
+		
+		dec vTotal = total
+		dec avg = vTotal / count
+		
+		char writeOut[]
+		
+		/*
+		writeOut = "client & $flavour & $(du.decToString(avg)) & $cid"
+		out.println(writeOut)
+		outFD.write("$writeOut\n")
+		*/
+		
+		vTotal = pd.metrics[0].totalValue
+		avg = vTotal / pd.metrics[0].totalCount
+		
+		writeOut = "server & $flavour & $(du.decToString(avg)) & $cid"
+		out.println(writeOut)
+		outFD.write("$writeOut\n")
+		
+		timer.sleep(TEST_INTERVAL)
+		}
+	
+	int App:main(AppParam params[])
+		{
+		//parse workload
+		
+		char testFile[] = params[0].string
+		
+		File fd = new File(testFile, File.FILE_ACCESS_READ)
+		
+		if (fd != null)
+			{
+			char content[] = fd.read(fd.getSize())
+			
+			currentWorkload = stringUtil.explode(content, "\r\n")
+			
+			fd.close()
+			}
+		
+		//output file
+		outFD = new File(outFile, File.FILE_ACCESS_WRITE)
+		
+		//connect to PAL
+		
+		restAPI = new RestAPI(DEFAULT_SERVER_IP, DEFAULT_SERVER_PORT)
+		
+		if (restAPI == null)
+			{
+			throw new Exception("failed to connect to REST service")
+			}
+		
+		configs = restAPI.getConfigs()
+		
+		//run analysis
+		
+		for (int i = 0; i < configs.arrayLength; i++)
+			{
+			testConfig(configs[i].string)
+			}
+		
+		outFD.close()
+		
+		return 0
+		}
+	
+	}

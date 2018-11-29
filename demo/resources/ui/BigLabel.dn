@@ -1,0 +1,20 @@
+interface BigLabel extends GraphicsObject {
+	
+	BigLabel(char text[], char font[], int fontSize)
+	
+	void setText(char text[])
+	
+	void setColor(Color c)
+	
+	void setVisible(bool v)
+	
+	void setSize(int w, int h)
+	
+	void setBackground(Color c)
+	
+	const int ALIGN_LEFT = 0
+	const int ALIGN_CENTER = 1
+	const int ALIGN_RIGHT = 2
+	void setAlign(byte a)
+	
+	}

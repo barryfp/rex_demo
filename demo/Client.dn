@@ -1,0 +1,225 @@
+uses events.EventData
+uses data.String
+
+//const char SERVER_ADDRESS[] = "localhost"
+const char SERVER_ADDRESS[] = "192.168.1.2"
+const int SERVER_PORT = 8080
+
+const int RECV_BUF_SIZE = 512
+
+const int BUTTON_HP = 35
+
+const int WORK_RATE = 50
+
+component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox {
+	
+	int BUTTON_WIDTH = 300
+	int BUTTON_HEIGHT = 300
+	
+	Window window
+	
+	Button closeButton
+	
+	CheckBox onSwitch
+	
+	//list of available files
+	String workloads[]
+	//current list of requests
+	String currentWorkload[]
+	//next list of requests, if any, to swap to
+	String nextWorkload[]
+	//UI of workloads
+	BigButton buttons[]
+	//index of current workload
+	int wkIndex
+	
+	Thread workerThread
+	bool workActive
+	
+	Mutex wkLock = new Mutex()
+	
+	eventsink UIEvents(EventData ed)
+		{
+		if (ed.source === closeButton && ed.type == Button.[click])
+			{
+			window.close()
+			}
+			else if (ed.source === onSwitch && ed.type == Button.[click])
+			{
+			if (onSwitch.isChecked())
+				{
+				buttons[wkIndex].setActive(true)
+				workActive = true
+				workerThread = asynch::clientThread()
+				}
+				else
+				{
+				workActive = false
+				workerThread.join()
+				buttons[wkIndex].setActive(false)
+				}
+			}
+			else if (ed.type == Button.[click])
+			{
+			for (int i = 0; i < buttons.arrayLength; i++)
+				{
+				if (ed.source === buttons[i])
+					{
+					if (workActive)
+						buttons[wkIndex].setActive(false)
+					
+					loadWorkload(i)
+					wkIndex = i
+					
+					if (workActive)
+						buttons[wkIndex].setActive(true)
+					break
+					}
+				}
+			}
+		}
+	
+	void makeRequest(char path[])
+		{
+		char req[] = new char[]("GET ", path, " HTTP/1.1\r\n\r\n")
+		
+		TCPSocket s = new TCPSocket()
+		
+		if (s.connect(SERVER_ADDRESS, SERVER_PORT))
+			{
+			s.send(req)
+			
+			int totalReceived = 0
+			byte resp[]
+			while ((resp = s.recv(RECV_BUF_SIZE)).arrayLength > 0)
+				{
+				totalReceived += resp.arrayLength
+				}
+			
+			s.disconnect()
+			}
+		}
+	
+	void clientThread()
+		{
+		int ndx
+		while (workActive)
+			{
+			mutex(wkLock)
+				{
+				if (nextWorkload != null)
+					{
+					ndx = 0
+					currentWorkload = nextWorkload
+					nextWorkload = null
+					}
+				}
+			
+			if (currentWorkload != null)
+				{
+				makeRequest(currentWorkload[ndx].string)
+				
+				ndx ++
+				
+				if (ndx >= currentWorkload.arrayLength)
+					{
+					ndx = 0
+					}
+				}
+			
+			timer.sleep(WORK_RATE)
+			}
+		}
+	
+	void loadWorkload(int index)
+		{
+		File fd = new File(workloads[index].string, File.FILE_ACCESS_READ)
+		
+		if (fd != null)
+			{
+			char content[] = fd.read(fd.getSize())
+			
+			mutex(wkLock)
+				{
+				nextWorkload = stringUtil.explode(content, "\r\n")
+				//out.println("workload $(iu.intToString(index)) has $(iu.intToString(nextWorkload.arrayLength)) lines")
+				}
+			
+			fd.close()
+			}
+		}
+	
+	void loadWorkloads()
+		{
+		FileEntry files[] = fileSystem.getDirectoryContents("workloads")
+		
+		BUTTON_HEIGHT = (window.getSize().height * BUTTON_HP) / 100
+		BUTTON_WIDTH = BUTTON_HEIGHT
+		
+		int columnCount = window.getSize().width / (BUTTON_WIDTH + 10)
+		
+		int baseX = (window.getSize().width - (columnCount * (BUTTON_WIDTH + 10))) / 2
+		
+		int nextX = baseX
+		int nextY = 50
+		
+		char label = "A"
+		
+		for (int i = 0; i < files.arrayLength; i++)
+			{
+			workloads = new String[](workloads, new String("workloads/$(files[i].name)"))
+			
+			out.println("workload $label :: $(files[i].name)")
+			
+			BigButton bb = new BigButton(label)
+			bb.setSize(BUTTON_WIDTH, BUTTON_HEIGHT)
+			bb.setPosition(nextX, nextY)
+			
+			buttons = new BigButton[](buttons, bb)
+			
+			window.addObject(bb)
+			sinkevent UIEvents(bb)
+			
+			label ++
+			
+			nextX += BUTTON_WIDTH + 10
+			
+			if (nextX + BUTTON_WIDTH > window.getSize().width)
+				{
+				nextX = baseX
+				nextY += BUTTON_HEIGHT + 10
+				}
+			}
+		}
+	
+	int App:main(AppParam params[])
+		{
+		//enumerate the workloads in the directory, make an on-screen button for each one
+		
+		window = new Window("Client control")
+		
+		window.setFullScreen(true)
+		
+		window.setBackground(new Color(70, 71, 70, 255))
+		
+		closeButton = new Button("Exit")
+		closeButton.setPosition(window.getSize().width - 60, 10)
+		sinkevent UIEvents(closeButton)
+		window.addObject(closeButton)
+		
+		onSwitch = new CheckBox("Enable traffic")
+		onSwitch.setPosition(10, 10)
+		onSwitch.setTextColor(new Color(255, 255, 255, 255))
+		sinkevent UIEvents(onSwitch)
+		window.addObject(onSwitch)
+		
+		loadWorkloads()
+		loadWorkload(0)
+		
+		window.setVisible(true)
+		window.waitForClose()
+		
+		return 0
+		}
+	
+	}

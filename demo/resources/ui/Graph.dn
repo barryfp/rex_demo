@@ -1,0 +1,18 @@
+interface Graph extends XYMouseObject {
+	
+	Graph()
+	
+	void setSize(int x, int y)
+	
+	void setAxes(dec x, dec y)
+	
+	void setScrollX(bool v)
+	
+	void addSeries(int ID, Color color)
+	
+	void addPoint(int seriesID, dec x, dec y)
+	
+	void setBackground(Color c)
+	void setHighlight(Color c)
+	
+	}

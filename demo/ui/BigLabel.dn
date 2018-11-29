@@ -1,0 +1,112 @@
+component provides BigLabel requires Font {
+	
+	char text[]
+	
+	Font font
+	
+	Color color
+	Color bgColor
+	
+	int width
+	int height
+	
+	int textWidth
+	
+	byte align
+	
+	bool visible
+	
+	BigLabel:BigLabel(char txt[], char fontPath[], int fontSize)
+		{
+		font = new Font(fontPath, fontSize)
+		
+		if (font == null) throw new Exception("Font '$fontPath' could not be loaded")
+		
+		text = txt
+		
+		color = new Color(0, 0, 0, 255)
+		}
+	
+	void BigLabel:setText(char txt[])
+		{
+		text = txt
+		textWidth = font.getTextWidth(text)
+		
+		postRepaint()
+		}
+	
+	void BigLabel:setColor(Color c)
+		{
+		color = c
+		
+		postRepaint()
+		}
+	
+	void BigLabel:setVisible(bool v)
+		{
+		visible = v
+		postRepaint()
+		}
+	
+	void BigLabel:setSize(int w, int h)
+		{
+		width = w
+		height = h
+		}
+	
+	void BigLabel:setBackground(Color c)
+		{
+		bgColor = c
+		}
+	
+	void BigLabel:setAlign(byte a)
+		{
+		align = a
+		
+		postRepaint()
+		}
+	
+	void BigLabel:setPosition(int x, int y)
+		{
+		xPosition = x
+		yPosition = y
+		
+		postRepaint()
+		}
+	
+	Point BigLabel:getPosition()
+		{
+		return new Point(xPosition, yPosition)
+		}
+	
+	void BigLabel:paint(Canvas c)
+		{
+		if (visible)
+			{
+			c.drawRect(new Rect2D(xPosition, yPosition, width, height, bgColor))
+			
+			if (align == BigLabel.ALIGN_LEFT || textWidth > width)
+				{
+				
+				}
+				else if (align == BigLabel.ALIGN_CENTER)
+				{
+				c.drawText(new Point2D(xPosition + (width / 2) - (textWidth / 2), yPosition, color), font, text)
+				}
+				else if (align == BigLabel.ALIGN_RIGHT)
+				{
+				c.drawText(new Point2D(xPosition, yPosition, color), font, text)
+				}
+			}
+		}
+	
+	WH BigLabel:getPreferredSize()
+		{
+		return new WH(font.getTextWidth(text), font.getFontMetrics().height)
+		}
+	
+	void BigLabel:postRepaint()
+		{
+		emitevent repaint()
+		}
+	}

@@ -1,0 +1,83 @@
+// CacheHanlderRR.dn
+// This component implements the caching strategy named Random Replacement.
+// This means that when deciding which stored item to replace it chooses randomly.
+// Author: Roberto Rodrigues Filho
+// August @ 2015
+
+const char debugMSG[] = "[@CacheHandlerRR]"
+
+const int MAX_SIZE = 100
+
+component provides cache.CacheHandler requires io.Output out, data.IntUtil iu, util.RandomInt ir, time.Calendar ic {
+
+	CachedResponse cache[]
+	int arraySize
+	Mutex cacheLock = new Mutex()
+
+	CachedResponse CacheHandler:getCachedResponse(char resource[]) {
+		//NOTE: this lock is actually a bit too coarse-grained...
+		mutex(cacheLock) {
+			for (int i = 0; i < arraySize; i++) {
+				if (cache[i].resource == resource) {
+					return cache[i]
+				}
+			}
+		}
+		
+		return null
+	}
+
+	int randomlyReplacement() {
+		DateTime dt = ic.getTime()
+		int msec = dt.millisecond
+		ir.setSeed(msec)
+		return ir.get(MAX_SIZE)
+	}
+	
+	void CacheHandler:updateCache(CachedResponse ncr) {
+	
+		mutex(cacheLock) {
+
+			for (int i = 0; i < arraySize; i++) {
+				if (cache[i].resource == ncr.resource) {
+					cache[i].response = ncr.response
+					cache[i].resourceAge = ncr.resourceAge
+
+					return
+				}
+			}
+			
+			// not found; add it
+			// copy ncr content to avoid read-only exception
+			// because ncr was created on another component
+			CachedResponse newEntry = new CachedResponse()
+			newEntry.command = ncr.command
+			newEntry.resource = ncr.resource
+			newEntry.resourceAge = ncr.resourceAge
+			newEntry.mimeType = ncr.mimeType
+			newEntry.response = new byte[](ncr.response)
+			newEntry.contentSize = ncr.contentSize
+			newEntry.fullContentSize = ncr.fullContentSize
+
+			if (cache == null) {
+				cache = new CachedResponse[MAX_SIZE]()
+			}
+
+			if (arraySize == MAX_SIZE) {
+				int index = randomlyReplacement()
+				cache[index] = newEntry
+				//out.println("$(debugMSG) replacing: $(iu.intToString(index))")
+			} else {
+				cache[arraySize] = newEntry
+				arraySize++
+			}
+		}
+	}
+
+	void CacheHandler:clearCache() {
+		mutex(cacheLock) {
+			cache = null
+			arraySize = 0
+		}
+	}
+}

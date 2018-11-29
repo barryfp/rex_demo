@@ -1,0 +1,208 @@
+const char server_name[] = "Dana Web Server v0.1"
+const char debugMSG[] = "[@HTTPHandlerGZ]"
+
+data SocketState{
+	TCPSocket socket
+	bool socketBusy
+	bool keepAlive
+	int unusedTime
+}
+
+const int SOCKET_KEEP_ALIVE_TIME = 1000
+const int SOCKET_LIVE_POLL_MS = 100
+
+component provides HTTPHandler requires io.Output out, data.IntUtil iu, io.FileSystem fileSystem, io.File, 
+ 	time.Timer t, time.Calendar ic, os.Run run, compression.Compression compress, cgi.CGI cgi, http.HTTPUtil httpUtil, pal.Perception perception {
+	
+	void startTimer(SocketState s, int sleep_time)
+		{
+		while (s.keepAlive)
+			{
+			t.sleep(SOCKET_LIVE_POLL_MS)
+			
+			if (s.socketBusy)
+				{
+				s.unusedTime = 0
+				s.socketBusy = false
+				}
+				else
+				{
+				s.unusedTime += SOCKET_LIVE_POLL_MS
+				
+				if (s.unusedTime >= sleep_time)
+					{
+					s.keepAlive = false
+					}
+				}
+			}
+		}
+
+	HTTPMessage processRequest(SocketState s, int sleep_time, int num_req, HTTPMessage httpMessage) {
+		HTTPMessage returnMessage = new HTTPMessage()
+		char resource[] = httpUtil.normalisePath(httpMessage.resource)
+		char mt[] = httpUtil.getMIMEType(resource)
+
+		if (mt == "php") {
+			CGIInfo cgiInfo = new CGIInfo()
+
+			if (httpMessage.command == "GET") {
+				
+				cgiInfo.redirectStatus 	= "TRUE" // not sure about this
+				cgiInfo.scriptFileName 	= httpMessage.resource
+				cgiInfo.requestMethod 	= httpMessage.command
+				cgiInfo.queryString 	= httpMessage.queryString
+
+				resource = cgi.getRequest(cgiInfo)
+			} else if (httpMessage.command == "POST") {
+
+				cgiInfo.redirectStatus 	= "TRUE" // not sure about this
+				cgiInfo.scriptFileName 	= httpMessage.resource
+				cgiInfo.requestMethod 	= httpMessage.command
+				cgiInfo.postData 		= httpMessage.postData
+
+				resource = cgi.postRequest(cgiInfo)
+			}
+
+			mt = httpUtil.getMIMEType(resource)
+		}
+
+		if (httpUtil.exists(resource)) {
+			returnMessage.mimeType = mt
+			
+			int actualSize = fileSystem.getInfo(resource).size
+			
+			char newName[] = ""
+
+			newName = compress.compressResource(resource)
+				
+			if (newName != "") {
+				resource = new char[](newName)
+			}
+				
+			File fd = new File(resource, File.FILE_ACCESS_READ)
+			
+			if (fd != null)
+				{
+				s.socketBusy = true
+				s.socket.send("HTTP/1.1 200 OK\r\n")
+				s.socket.send("Server: $server_name\r\n")
+
+				if (newName != "") {
+					s.socket.send("Content-Encoding: $(compress.algorithmName())\r\n")
+				} else {
+					s.socket.send("Content-Encoding: binary\r\n")
+				}
+				
+				s.socket.send("Content-Length: $(iu.intToString(fd.getSize()))\r\n")
+				s.socket.send("Keep-Alive: timeout=$(iu.intToString(sleep_time/1000)), max=$(iu.intToString(100-num_req))\r\n")
+				s.socket.send("Connection: Keep-Alive\r\n")
+				s.socket.send("Content-Type: $mt\r\n")
+				s.socket.send("\r\n")
+				
+				byte fbuf[]
+				int tl = 0
+				while ((fbuf = fd.read(2048)).arrayLength > 0) {
+					tl += fbuf.arrayLength
+					s.socketBusy = true
+					s.socket.send(fbuf)
+				}
+
+				returnMessage.contentLength = actualSize
+				returnMessage.status = 200
+
+				fd.close()
+				}
+				//TODO: respond with internal server error
+		} else {
+			s.socket.send("HTTP/1.1 404 Resource Not Found\r\n")
+			s.socket.send("Server: $server_name\r\n")
+			s.socket.send("Connection: close\r\n")
+			s.socket.send("\r\n")
+			//out.println("404!!!")
+
+			returnMessage.status = 404
+			returnMessage.mimeType = "404"
+			return returnMessage
+		}
+
+		return returnMessage
+	}
+
+	void HTTPHandler:handleStream(TCPSocket s) {
+		int num_req = 0
+		int sleep_time = SOCKET_KEEP_ALIVE_TIME
+		
+		SocketState ss = new SocketState(s, false, true)
+
+		asynch::startTimer(ss, sleep_time)
+		
+		while (num_req < 100 && ss.keepAlive) {
+			HTTPMessage httpMessage = httpUtil.readHTTPRequest(s)
+			
+			// client closed connection
+			if (httpMessage != null) {
+				DateTime dt = ic.getTime()
+				int sec = dt.second
+				int min = dt.minute
+				int msec = dt.millisecond
+
+				if (httpMessage.connection == "keep-alive\r") {
+					ss.keepAlive = true
+				} else {
+					ss.keepAlive = false
+				}
+				
+				if ((httpMessage.command == "GET") ||
+					(httpMessage.command == "POST")) {
+					
+					ss.socketBusy = true
+					
+					httpMessage = processRequest(ss, sleep_time, num_req, httpMessage)
+					if (httpMessage.status != 200) {
+						ss.keepAlive = false
+					}
+
+				} else {
+					// TODO: create a send method that will take the info from a variable 
+					// and write it to the socket
+					ss.socketBusy = true
+					s.send("HTTP/1.1 501 Not Implemented\r\n")
+					s.send("Server: $server_name\r\n")
+					s.send("Connection: close\r\n")
+					s.send("\r\n")
+
+					httpMessage.mimeType = "501"
+					ss.keepAlive = false
+				}
+
+				// if it takes more than a minute this will not work
+				dt = ic.getTime()
+
+				int result = 0
+
+				if (dt.second > sec) {
+					result = (1000 - msec) + dt.millisecond
+					result += ((dt.second - sec) - 1) * 1000
+				} else if (dt.second == sec) {
+					result = dt.millisecond - msec
+				} else if (dt.second < sec) {
+					result = (1000 - msec) + dt.millisecond
+					result += (((60 - sec) + dt.second) - 1) * 1000
+				}
+
+				//out.println("$(debugMSG) eventAdded!")
+				perception.addMetric("response_time", result, false)
+				perception.addEvent(httpUtil.getEvent(httpMessage.mimeType), httpMessage.contentLength)
+
+			} else {
+				break
+			}
+
+			num_req++
+		}
+
+		s.disconnect()
+	}
+
+}
+

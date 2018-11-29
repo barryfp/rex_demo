@@ -1,0 +1,28 @@
+Physical gear needed for this demo:
+
+Linux box for server, small screen, keyboard
+
+Any machine for client, big screen, with mouse + keyboard
+
+Laptop for presentation
+
+Network hub (Ethernet)
+
+3x network cables: 1x 10m, 1x 5m, 1 short
+
+Power extension cables: 1x 10m with two sockets; 1x short with 4 sockets
+
+Display cables for presenter laptop, Linux server, client machine
+
+Mouse for presenter laptop
+
+Gorrilla tape for cabling on floor
+
+
+Guide:
+
+Linux server needs the "web_server" directory, with generated content using "GenerateContent" in htdocs
+
+Client machine needs the "demo" folder
+
+Presenter laptop needs to "demo" folder

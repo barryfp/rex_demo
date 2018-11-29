@@ -1,0 +1,282 @@
+const dec ENV_TOLERANCE = 0.6
+
+//costs are truncated at these boundaries, before being converted into a reward:
+// - note that the algorithm will not work if all costs lie outside these bounds
+const dec LOW_COST = 0.0
+const dec HIGH_COST = 10.0
+
+//set this to 1.0 for no penalty:
+const dec EXPLORATION_PENALTY = 10.0
+
+data CoreRLData {
+	RLInput env[]
+	dec rewards[]
+	dec counts[]
+	dec totalCount
+	}
+
+component provides RL requires io.Output out, data.IntUtil iu, data.DecUtil du, data.query.Search search, util.Math math {
+	
+	int bestCount = 3
+	
+	CoreRLData state[]
+	RLData publicState[]
+	String actions[]
+	int currentState
+	int currentAction
+	
+	void RL:setActions(String actionList[])
+		{
+		//NOTE: if "actions" is not null we need to re-map all rewards and counts for all states based on the incoming list compared against the existing action list
+		
+		actions = actionList
+		}
+	
+	void addState(RLInput environment[])
+		{
+		CoreRLData nr = new CoreRLData()
+		nr.env = clone environment
+		nr.rewards = new dec[actions.arrayLength]
+		nr.counts = new dec[actions.arrayLength]
+		
+		state = new CoreRLData[](state, nr)
+		publicState = new RLData[](publicState, new RLData())
+		}
+	
+	dec absDiff(dec a, dec b)
+		{
+		if (a > b)
+			return a - b
+			else
+			return b - a
+		}
+	
+	dec envDiff(RLInput envA[], RLInput envB[])
+		{
+		dec result = 0.0
+		int i
+		
+		for (i = 0; i < envA.arrayLength; i++)
+			{
+			RLInput fnd[] = search.search(envB, RLInput.[name], envA[i])
+			
+			if (fnd != null)
+				{
+				result += absDiff(envA[i].val, fnd[0].val)
+				}
+				else
+				{
+				result += envA[i].val
+				}
+			}
+		
+		for (i = 0; i < envB.arrayLength; i++)
+			{
+			RLInput fnd[] = search.search(envA, RLInput.[name], envB[i])
+			
+			if (fnd == null)
+				{
+				result += envB[i].val
+				}
+			}
+		
+		return result
+		}
+	
+	void setEnvironment(RLInput environment[])
+		{
+		if (state == null)
+			{
+			addState(environment)
+			}
+			else
+			{
+			//check if environment is within the threshold for any known environment; if so, move to that environment
+			// - if not, create a new one
+			// - either way, set currentState to the correct environment
+			
+			dec closestDist = 0.0
+			bool noFind = true
+			int index = 0
+			
+			for (int i = 0; i < state.arrayLength; i++)
+				{
+				dec d = envDiff(state[i].env, environment)
+				if (d < ENV_TOLERANCE && (noFind || d < closestDist))
+					{
+					closestDist = d
+					index = i
+					noFind = false
+					}
+				}
+			
+			if (noFind)
+				{
+				addState(environment)
+				currentState = state.arrayLength-1
+				}
+				else
+				{
+				currentState = index
+				}
+			}
+		}
+	
+	dec costToReward(dec cost, dec highCost, dec lowCost)
+		{
+		//here we lock the cost between the given range, where anything falling outside of that range is just set of highCost
+		// - we then do 1/cost to convert to reward
+		
+		//first truncate at high/low cost
+		if (cost > highCost)
+			{
+			cost = highCost
+			}
+			else if (cost < lowCost)
+			{
+			cost = lowCost
+			}
+		
+		//shift negative low
+		if (lowCost < 0.0)
+			{
+			dec mod = lowCost / -1.0
+			cost += mod
+			lowCost += mod
+			highCost += mod
+			}
+		
+		//now convert the range into 0.0 -> 1.0
+		dec scaledCost = cost / highCost
+		
+		//and invert to get reward
+		dec reward = 1.0 - scaledCost
+		
+		return reward
+		}
+	
+	void updateTable(dec reward, int action)
+		{
+		CoreRLData cdata = state[currentState]
+		
+		cdata.counts[action] += 1.0
+		
+		dec n = cdata.counts[action]
+		
+		dec value = cdata.rewards[action]
+		dec newValue = ((n - 1.0) / n) * value + (1.0 / n) * reward
+		
+		cdata.rewards[action] = newValue
+		}
+	
+	int selectAction()
+		{
+		CoreRLData cdata = state[currentState]
+		
+		for (int i = 0; i < cdata.counts.arrayLength; i++)
+			{
+			if (cdata.counts[i] == 0.0)
+				return i
+			}
+		
+		dec maxVal = 0.0
+		int maxInd = 0
+		
+		for (int i = 0; i < cdata.counts.arrayLength; i++)
+			{
+			// UCB1
+			//dec bonus = math.sqrt((2.0 * math.natlog(cdata.totalCount)) / cdata.counts[i])
+			
+			// UCB1-tuned (with no variance term)
+			dec bonus = math.sqrt((math.natlog(cdata.totalCount) / cdata.counts[i]) * (0.25 * ((2.0 * math.natlog(cdata.totalCount)) / cdata.counts[i])))
+			
+			//add a "penalty" for exploration, to converge more quickly, since our expected variance is very small
+			bonus = bonus / EXPLORATION_PENALTY
+			
+			dec val = cdata.rewards[i] + bonus
+			
+			if (val > maxVal)
+				{
+				maxVal = val
+				maxInd = i
+				}
+			}
+		
+		return maxInd
+		}
+	
+	RLData[] RL:consumeData(RLInput environment[], RLInput reward[])
+		{
+		if (environment == null)
+			return publicState
+		
+		int prevState = currentState
+		
+		if (state != null) state[currentState].totalCount += 1.0
+		
+		//this function populates a new environment and updates currentState if needed
+		// (this is our classifier)
+		setEnvironment(environment)
+		
+		if (reward != null)
+			{
+			//now we just compute the next action to take for currentState, based on reward and confidence
+			updateTable(costToReward(reward[0].val, HIGH_COST, LOW_COST), currentAction)
+			//shareData() //TODO: share learned data across "similar" actions, where the amount of sharing is proportional to the amount of similarity...
+			currentAction = selectAction()
+			
+			//NOTE: we'll probably just have a fixed "explore time" for each environment, after which we stop doing things, e.g. 10 explores then exploit?
+			}
+		
+		publicState[prevState].current = false
+		publicState[currentState].current = true
+		
+		publicState[currentState].nextAction = currentAction
+		
+		return publicState
+		}
+	
+	int RL:getAction()
+		{
+		return currentAction
+		}
+	
+	int RL:getState()
+		{
+		return currentState
+		}
+	
+	int[] RL:getTopActions(int forState, int n)
+		{
+		CoreRLData cdata = state[forState]
+		dec cval[]
+		
+		if (cdata.rewards != null)
+			cval = clone cdata.rewards
+			else
+			cval = new dec[actions.arrayLength]
+		
+		int q[] = new int[n]
+		
+		for (int j = 0; j < n; j++)
+			{
+			dec highVal = -1.0
+			int highInd = 0
+			
+			for (int i = 0; i < cval.arrayLength; i++)
+				{
+				if (cval[i] > highVal)
+					{
+					highVal = cval[i]
+					highInd = i
+					}
+				}
+			
+			q[j] = highInd
+			cval[highInd] = -1.0
+			}
+		
+		return q
+		}
+	
+	}

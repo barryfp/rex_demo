@@ -1,0 +1,6 @@
+0 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]
+1 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]
+2 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]
+3 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]
+4 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]
+5 | "metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]

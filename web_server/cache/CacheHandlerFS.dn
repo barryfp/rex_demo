@@ -1,0 +1,70 @@
+// CacheHanlderFS.dn
+// This component implements caching with a fixed size array to store item.
+// Author: Roberto Rodrigues Filho
+// August @ 2015
+
+const int MAX_SIZE = 100
+
+component provides cache.CacheHandler requires io.Output out, data.IntUtil iu {
+
+	CachedResponse cache[]
+	int arraySize
+	Mutex cacheLock = new Mutex()
+
+	CachedResponse CacheHandler:getCachedResponse(char resource[]) {
+		//NOTE: this lock is actually a bit too coarse-grained...
+		mutex(cacheLock) {
+			for (int i = 0; i < arraySize; i++) {
+				if (cache[i].resource == resource) {
+					return cache[i]
+				}
+			}
+		}
+		
+		return null
+	}
+	
+	void CacheHandler:updateCache(CachedResponse ncr) {
+	
+		mutex(cacheLock) {
+			for (int i = 0; i < arraySize; i++) {
+				if (cache[i].resource == ncr.resource) {
+					cache[i].response = ncr.response
+					cache[i].resourceAge = ncr.resourceAge
+
+					return
+				}
+			}
+			
+			//not found; add it
+			// copy ncr content to avoid read-only exception
+			// because ncr was created on another component
+			CachedResponse newEntry = new CachedResponse()
+			newEntry.command = ncr.command
+			newEntry.resource = ncr.resource
+			newEntry.resourceAge = ncr.resourceAge
+			newEntry.mimeType = ncr.mimeType
+			newEntry.response = new byte[](ncr.response)
+			newEntry.contentSize = ncr.contentSize
+			newEntry.fullContentSize = ncr.fullContentSize
+
+			if (cache == null) {
+				cache = new CachedResponse[MAX_SIZE]()
+			}
+
+			if (arraySize == MAX_SIZE) {
+				arraySize = 0
+			}
+			
+			cache[arraySize] = newEntry
+			arraySize++
+		}
+	}
+
+	void CacheHandler:clearCache() {
+		mutex(cacheLock) {
+			cache = null
+			arraySize = 0
+		}
+	}
+}

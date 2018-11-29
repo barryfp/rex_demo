@@ -1,0 +1,523 @@
+uses events.EventData
+uses data.String
+
+//const char DEFAULT_SERVER_IP[] = "localhost"
+const char DEFAULT_SERVER_IP[] = "192.168.1.2"
+const int DEFAULT_SERVER_PORT = 8008
+
+const int ENV_WIDTH = 45
+const int BBL_WIDTH = 45
+
+const int TOP_HEIGHT = 25
+
+const int PANEL_WIDTH = 70
+
+const int WINDOW_SIZE = 500
+
+data EnvMap {
+	char name[]
+	}
+
+data LearningState {
+	Panel panel
+	
+	Graph envGraph
+	EnvMap envSeries[]
+	dec envLastX
+	dec envMaxY
+	
+	Panel graphPanel
+	Graph currentGraph
+	Label currentNumber
+	dec curLastX
+	Graph graphs[]
+	Label graphNumbers[]
+	dec lastX[]
+	dec metricMaxY
+	int rgraph
+	
+	int topGraphs[]
+	int currentActionIndex
+	}
+
+data SimEnv {
+	RLInput env[]
+	}
+
+data ColorMap {
+	char name[]
+	Color color
+	}
+
+component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ml.RL learner, io.TextFile, data.query.Search find {
+	
+	bool testMode// = true
+	
+	Window window
+	
+	Button closeButton
+	
+	LearningState states[]
+	int currentState
+	
+	Panel componentsPanel
+	Label comList[]
+	
+	RestAPI restAPI
+	String configs[]
+	
+	Color panelBackgroundOff = new Color(150, 150, 150, 255)
+	Color panelBackgroundOn = new Color(150, 170, 150, 255)
+	Color graphBackgroundOff = new Color(200, 200, 200, 255)
+	
+	int nextPanelY = 50
+	
+	TextFile simFile
+	String simEnvs[]
+	
+	ColorMap colors[]
+	
+	Color getColorFor(char name[])
+		{
+		ColorMap fnd[] = find.search(colors, ColorMap.[name], new ColorMap(name))
+		
+		if (fnd != null)
+			return fnd[0].color
+		
+		ColorMap cm = new ColorMap(name, new Color(random.get(100), random.get(100), random.get(100), 255))
+		
+		colors = new ColorMap[](colors, cm)
+		
+		return cm.color
+		}
+	
+	char[] getSimMetric(int envIndex, int action)
+		{
+		char result[]
+		TextFile fd = new TextFile("synth_data/env_$(iu.intToString(envIndex)).txt", File.FILE_ACCESS_READ)
+		
+		if (fd != null)
+			{
+			while (!fd.eof())
+				{
+				char ln[] = fd.readLine()
+				
+				String parts[] = stringUtil.explode(ln, "|")
+				
+				if (iu.intFromString(parts[0].string) == action)
+					{
+					result = parts[1].string
+					break
+					}
+				}
+			
+			fd.close()
+			}
+		
+		return result
+		}
+	
+	void addEnvGraphPoint(LearningState ls, char seriesName[], dec val)
+		{
+		bool found
+		int seriesID = 0
+		
+		//get series ID; if it doesn't exist, create a new series with its own colour
+		for (int j = 0; j < ls.envSeries.arrayLength; j ++)
+			{
+			if (ls.envSeries[j].name == seriesName)
+				{
+				seriesID = j
+				found = true
+				break
+				}
+			}
+		
+		if (!found)
+			{
+			ls.envSeries = new EnvMap[](ls.envSeries, new EnvMap(seriesName))
+			seriesID = ls.envSeries.arrayLength - 1
+			ls.envGraph.addSeries(seriesID, getColorFor(seriesName))
+			}
+		
+		//check graph scale
+		
+		if (val > ls.envMaxY)
+			{
+			ls.envMaxY = val + 1.0
+			
+			ls.envGraph.setAxes(20.0, ls.envMaxY)
+			}
+		
+		//render on EnvGraph, using the correct series ID
+		
+		ls.envGraph.addPoint(seriesID, ls.envLastX, val)
+		}
+	
+	//this loop just updates the graphs with the latest data, using getPerception
+	void timeLoop()
+		{
+		while (true)
+			{
+			timer.sleep(WINDOW_SIZE)
+			
+			//int rgraph = random.get(graphs.arrayLength)
+			
+			// data format: {"metrics" : [ {"name" : "response_time", "source" : "", "value" : 3857, "count" : 5212, "preferHigh" : false, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}], "events" : [{"name" : "text", "source" : "", "value" : 20175652, "count" : 5212, "startTime" : "2018-11-06 15:27:21", "endTime" : "2018-11-06 15:27:31"}]}
+			
+			JSONElement doc
+			JSONElement se
+			
+			if (!testMode)
+				{
+				HTTPResponse r = request.get("http://$DEFAULT_SERVER_IP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
+				char response[] = r.content
+				
+				doc = parser.parseDocument(response)
+				}
+				else
+				{
+				//grab the environment for this time step, then the reward for this action in this environment, from samples file
+				// - then construct the JSON from this and parse it...
+				
+				char ln[] = simFile.readLine()
+				
+				if (ln.arrayLength != 0)
+					{
+					int index = 0
+					
+					for (int i = 0; i < simEnvs.arrayLength; i++)
+						{
+						if (simEnvs[i].string == ln)
+							{
+							index = i+1
+							break
+							}
+						}
+					
+					if (index == 0)
+						{
+						simEnvs = new String[](simEnvs, new String(ln))
+						index = simEnvs.arrayLength
+						}
+					
+					char metric[] = getSimMetric(index, states[currentState].currentActionIndex)
+					
+					ln = "{$metric, $ln}"
+					
+					doc = parser.parseDocument(ln)
+					}
+				}
+			
+			dec reward
+			
+			if ((se = parser.getValue(doc, "metrics")) != null)
+				{
+				dec vk = iu.intFromString(parser.getValue(se.children[0], "value").value)
+				dec vt = iu.intFromString(parser.getValue(se.children[0], "count").value)
+				
+				dec avg = vk / vt
+				
+				reward = avg
+				}
+			
+			RLInput rewards = new RLInput("primary", reward)
+			RLInput env[] = null
+			
+			if ((se = parser.getValue(doc, "events")) != null)
+				{
+				for (int i = 0; i < se.children.arrayLength; i ++)
+					{
+					char name[] = parser.getValue(se.children[i], "name").value
+					
+					dec vk = iu.intFromString(parser.getValue(se.children[i], "value").value)
+					dec vt = iu.intFromString(parser.getValue(se.children[i], "count").value)
+					
+					dec avg = vk / vt
+					
+					env = new RLInput[](env, new RLInput(name, avg))
+					}
+				}
+			
+			states[currentState].currentNumber.setText(iu.intToString(states[currentState].currentActionIndex+1))
+			
+			//update the reward graph (of current action) and environment graph of current state with the above data
+			int cai = states[currentState].currentActionIndex
+			states[currentState].lastX[cai] += 0.5
+			states[currentState].graphs[cai].addPoint(0, states[currentState].lastX[cai], reward)
+			
+			states[currentState].curLastX += 0.5
+			states[currentState].currentGraph.addPoint(0, states[currentState].curLastX, reward)
+			
+			if (env != null)
+				{
+				states[currentState].envLastX += 0.5
+				
+				for (int i = 0; i < env.arrayLength; i++)
+					{
+					addEnvGraphPoint(states[currentState], env[i].name, env[i].val)
+					}
+				}
+			
+			//talk to learning module, get next action
+			RLData rlData[] = learner.consumeData(env, rewards)
+			int action = learner.getAction()
+			int state = learner.getState()
+			
+			//compare "rlData" with our own representation, updating as appropriate
+			
+			if (!testMode)
+				{
+				restAPI.setConfig(configs[action].string)
+				}
+			
+			if (rlData.arrayLength > states.arrayLength)
+				{
+				LearningState lsq = new LearningState()
+				loadState(lsq, window)
+				refreshTopGraphs(lsq)
+				
+				states = new LearningState[](states, lsq)
+				
+				window.addObject(lsq.panel)
+				}
+			
+			int prevState = currentState
+			currentState = state
+			
+			int best[] = learner.getTopActions(state, 3)
+			
+			//update best N graphs (iff they need to be updated)
+			if (best != states[currentState].topGraphs)
+				{
+				states[currentState].topGraphs = clone best
+				refreshTopGraphs(states[currentState])
+				}
+			
+			//update current action view (just the number)
+			
+			states[currentState].currentActionIndex = action
+			
+			//update highlighted environment
+			states[prevState].panel.setBackground(panelBackgroundOff)
+			states[prevState].graphPanel.setBackground(panelBackgroundOff)
+			states[currentState].panel.setBackground(panelBackgroundOn)
+			states[currentState].graphPanel.setBackground(panelBackgroundOn)
+			}
+		}
+	
+	//handling user input events
+	eventsink UIEvents(EventData ed)
+		{
+		if (ed.source == closeButton && ed.type == Button.[click])
+			{
+			window.close()
+			}
+		}
+	
+	void loadState(LearningState ls, Window w)
+		{
+		int graphCount = configs.arrayLength
+		int windowWidth = w.getSize().width
+		int windowHeight = w.getSize().height
+		
+		int panelWidth = ((windowWidth * PANEL_WIDTH) / 100)
+		int panelHeight = 200
+		
+		ls.panel = new Panel()
+		ls.panel.setSize(panelWidth, panelHeight)
+		ls.panel.setPosition((windowWidth / 2) - (panelWidth / 2), nextPanelY)
+		
+		nextPanelY += panelHeight + 50
+		
+		Label l = new Label("environment", "SourceSansPro.ttf", 40)
+		l.setPosition(2, 0)
+		l.setColor(new Color(255, 255, 255, 255))
+		ls.panel.addObject(l)
+		
+		/*
+		l = new Label("current behaviour blocks", "SourceSansPro.ttf", 40)
+		l.setPosition(((windowWidth * ENV_WIDTH) / 100) + 50 + 50, 20)
+		l.setColor(new Color(255, 255, 255, 255))
+		w.addObject(l)
+		*/
+		
+		l = new Label("reward", "SourceSansPro.ttf", 40)
+		l.setPosition(((panelWidth * 30) / 100) + 40, 0)
+		l.setColor(new Color(255, 255, 255, 255))
+		ls.panel.addObject(l)
+		
+		l = new Label("top three", "SourceSansPro.ttf", 40)
+		l.setPosition(((panelWidth * 30) / 100) + 40 + ((panelHeight * 75) / 100) + 40, 0)
+		l.setColor(new Color(255, 255, 255, 255))
+		ls.panel.addObject(l)
+		
+		ls.envGraph = new Graph()
+		ls.envGraph.setSize((panelWidth * 30) / 100, (panelHeight * 75) / 100)
+		ls.envGraph.setPosition(5, 45)
+		
+		ls.envGraph.setBackground(graphBackgroundOff)
+		ls.envGraph.setHighlight(graphBackgroundOff)
+		
+		ls.envGraph.setAxes(20.0, 50000.0)
+		ls.envMaxY = 50000.0
+		
+		ls.panel.addObject(ls.envGraph)
+		
+		int GRAPH_PAD = 20
+		int GRAPH_WIDTH = (panelHeight * 75) / 100
+		int GRAPH_HEIGHT = GRAPH_WIDTH
+		int nextX = 50
+		int nextY = ((windowHeight * TOP_HEIGHT) / 100) + 160
+		
+		ls.currentGraph = new Graph()
+		ls.currentGraph.setSize(GRAPH_WIDTH, GRAPH_HEIGHT)
+		ls.currentGraph.setPosition(((panelWidth * 30) / 100) + 40, 45)
+		ls.currentGraph.setAxes(15.0, 5.0)
+		
+		ls.currentGraph.setBackground(graphBackgroundOff)
+		ls.currentGraph.setHighlight(graphBackgroundOff)
+		
+		ls.currentGraph.addSeries(0, new Color(0, 0, 255, 255))
+		
+		ls.panel.addObject(ls.currentGraph)
+		
+		ls.currentNumber = new Label("?", "SourceSansPro.ttf", 22)
+		ls.currentNumber.setPosition(((panelWidth * 30) / 100) + 40 + GRAPH_WIDTH - 25, 47)
+		
+		ls.panel.addObject(ls.currentNumber)
+		
+		ls.graphPanel = new Panel()
+		ls.graphPanel.setSize((panelWidth * 60) / 100, (panelHeight * 75) / 100)
+		ls.graphPanel.setPosition(((panelWidth * 30) / 100) + 40 + GRAPH_WIDTH + 40, 45)
+		ls.panel.addObject(ls.graphPanel)
+		
+		for (int i = 0; i < graphCount; i++)
+			{
+			Graph g = new Graph()
+			g.setSize(GRAPH_WIDTH, GRAPH_HEIGHT)
+			
+			//g.setPosition(nextX, nextY)
+			g.setAxes(15.0, 5.0)
+			
+			l = new Label(iu.intToString(i+1), "SourceSansPro.ttf", 22)
+			l.setPosition(nextX + GRAPH_WIDTH - 25, nextY + 2)
+			l.setColor(new Color(100, 100, 100, 255))
+			
+			nextX += GRAPH_WIDTH + GRAPH_PAD
+			
+			if (nextX + GRAPH_WIDTH > windowWidth)
+				{
+				nextX = 50
+				
+				nextY += GRAPH_HEIGHT + GRAPH_PAD
+				}
+			
+			g.addSeries(0, new Color(0, 0, 255, 255))
+			
+			sinkevent UIEvents(g)
+			
+			ls.graphs = new Graph[](ls.graphs, g)
+			
+			ls.graphNumbers = new Label[](ls.graphNumbers, l)
+			
+			ls.lastX = new dec[](ls.lastX, 0.0)
+			}
+		
+		ls.topGraphs = new int[3]
+		ls.topGraphs[0] = 0
+		ls.topGraphs[1] = 1
+		ls.topGraphs[2] = 2
+		
+		ls.currentActionIndex = 0
+		}
+	
+	void refreshTopGraphs(LearningState ls)
+		{
+		ls.graphPanel.clearObjects()
+		
+		int windowWidth = window.getSize().width
+		int panelHeight = 200
+		int panelWidth = ((windowWidth * PANEL_WIDTH) / 100)
+		int GRAPH_WIDTH = (panelHeight * 75) / 100
+		
+		int nextX = 0
+		int nextY = 0
+		
+		for (int i = 0; i < ls.topGraphs.arrayLength; i++)
+			{
+			Graph q = ls.graphs[ls.topGraphs[i]]
+			
+			q.setPosition(nextX, nextY)
+			
+			ls.graphPanel.addObject(q)
+			
+			Label l = ls.graphNumbers[ls.topGraphs[i]]
+			l.setPosition(nextX + GRAPH_WIDTH - 25, nextY + 2)
+			
+			ls.graphPanel.addObject(l)
+			
+			nextX += GRAPH_WIDTH + 10
+			}
+		}
+	
+	int App:main(AppParam params[])
+		{
+		window = new Window("PAL Command")
+		
+		window.setFullScreen(true)
+		window.setBackground(new Color(70, 71, 70, 255))
+		
+		closeButton = new Button("Exit")
+		closeButton.setPosition(window.getSize().width - 60, 10)
+		sinkevent UIEvents(closeButton)
+		window.addObject(closeButton)
+		
+		if (!testMode)
+			{
+			restAPI = new RestAPI(DEFAULT_SERVER_IP, DEFAULT_SERVER_PORT)
+			
+			if (restAPI == null)
+				{
+				throw new Exception("failed to connect to REST service")
+				}
+			
+			configs = restAPI.getConfigs()
+			
+			if (configs == null)
+				{
+				throw new Exception("failed to connect to REST service")
+				}
+			}
+			else
+			{
+			simFile = new TextFile("synth_data/env.txt", File.FILE_ACCESS_READ)
+			configs = new String[5]
+			}
+		
+		LearningState ls = new LearningState()
+		loadState(ls, window)
+		
+		states = new LearningState[](states, ls)
+		
+		refreshTopGraphs(states[0])
+		
+		window.addObject(states[0].panel)
+		
+		learner.setActions(configs)
+		
+		states[currentState].panel.setBackground(panelBackgroundOn)
+		states[currentState].graphPanel.setBackground(panelBackgroundOn)
+		
+		//move to action 0, which is where the learning system starts...
+		restAPI.setConfig(configs[0].string)
+		
+		asynch::timeLoop()
+		
+		window.setVisible(true)
+		window.waitForClose()
+		
+		return 0
+		}
+	
+	}

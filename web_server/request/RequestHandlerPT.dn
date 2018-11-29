@@ -1,0 +1,147 @@
+data WorkItem {
+	TCPSocket client
+	WorkItem next
+}
+
+data WorkerThread {
+	Thread thread
+	
+	WorkItem work
+	WorkItem lastWork
+	int workCount
+	
+	WorkerThread next
+}
+
+const char debugMSG[] = "[@RequestHandlerPT]"
+
+component provides request.RequestHandler(Destructor, AdaptEvents) requires io.Output out, data.IntUtil iu, 
+	http.HTTPHandler httpHandler, time.Timer t, time.Calendar ic {
+	
+	bool setupDone
+	WorkerThread workers
+	WorkerThread lastWorker
+	WorkerThread lastUsedWorker
+	bool destroying
+
+	void processStream(TCPSocket s) {
+		DateTime dt = ic.getTime()
+		int sec = dt.second
+		int min = dt.minute
+		int msec = dt.millisecond
+
+		httpHandler.handleStream(s)
+
+		// if it takes more than a minute this will not work
+		dt = ic.getTime()
+
+		int result = 0
+
+		if (dt.second > sec) {
+			result = (1000 - msec) + dt.millisecond
+			result += ((dt.second - sec) - 1) * 1000
+		} else if (dt.second == sec) {
+			result = dt.millisecond - msec
+		} else if (dt.second < sec) {
+			result = (1000 - msec) + dt.millisecond
+			result += (((60 - sec) + dt.second) - 1) * 1000
+		}
+	}
+
+	void workerThread(WorkerThread state) {
+		while (true) {
+			this.thread.wait()
+			
+			if (state.workCount != 0) {
+				WorkItem w = state.work
+				
+				mutex(state) {
+					w = state.work
+					state.work = w.next
+					if (state.work == null) state.lastWork = null
+					
+					state.workCount --
+				}
+				
+				processStream(w.client)
+			}
+			
+			if (destroying && state.workCount == 0)
+				break
+		}
+	}
+	
+	void setup() {
+		if (! setupDone) {
+			//configure the thread pool
+			
+			for (int i = 0; i < 10; i++) {
+				WorkerThread nwt = new WorkerThread()
+				nwt.thread = asynch::workerThread(nwt)
+				
+				if (lastWorker == null)
+					workers = nwt
+				else
+					lastWorker.next = nwt
+				
+				lastWorker = nwt
+			}
+			
+			setupDone = true
+		}
+	}
+	
+	WorkerThread getWorkerFor(TCPSocket s) {
+		//TODO: decide on the policy to assign a WorkItem to a worker thread
+		if (lastUsedWorker == null) lastUsedWorker = workers
+		
+		WorkerThread result = lastUsedWorker
+		
+		lastUsedWorker = lastUsedWorker.next
+		
+		return result
+	}
+	
+	void RequestHandler:handleRequest(TCPSocket s) {
+		setup()
+	
+		WorkItem nwi = new WorkItem(s)
+		
+		WorkerThread wt = getWorkerFor(s)
+		
+		mutex(wt) {
+			if (wt.lastWork == null)
+				wt.work = nwi
+			else
+				wt.lastWork.next = nwi
+			
+			wt.lastWork = nwi
+			
+			wt.workCount ++
+		}
+		
+		wt.thread.signal()
+	}
+	
+	void AdaptEvents:inactive()
+		{
+		destroy()
+		}
+
+	// worker, last worker and lastusedworker is a bit confusing...
+	void Destructor:destroy() {
+		WorkerThread wt = workers
+		
+		destroying = true
+
+		for (int i = 0; i < 10; i++) {
+			if (wt != null) {
+				wt.thread.signal()
+				wt.thread.join()
+				wt = wt.next
+			} else {
+				break
+			}
+		}
+	}
+}

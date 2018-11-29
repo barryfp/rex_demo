@@ -1,0 +1,234 @@
+data XYD {
+	dec x
+	dec y
+	int ix
+	int iy
+	}
+
+data Series {
+	int ID
+	Color color
+	XYD points[]
+	int firstPointIndex
+	}
+
+const int BORDER_SIZE = 5
+
+component provides Graph {
+	
+	int width
+	int height
+	
+	int plotWidth
+	int plotHeight
+	
+	Rect plotRect = new Rect()
+	Rect boundsRect = new Rect()
+	
+	Color backgroundOff = new Color(200, 200, 200, 255)
+	Color backgroundOver = new Color(200, 200, 250, 255)
+	
+	Color background = backgroundOff
+	
+	Color axisColor = new Color(0, 0, 0, 255)
+	
+	Series series[]
+	
+	dec yMax
+	dec xMax
+	
+	int highestX
+	int xScroll
+	
+	bool hover
+	
+	bool offScaleMarkers = true
+	
+	Graph:Graph()
+		{
+		
+		}
+	
+	void Graph:setSize(int w, int h)
+		{
+		width = w
+		height = h
+		
+		plotWidth = width - (BORDER_SIZE*2)
+		plotHeight = height - (BORDER_SIZE*2)
+		
+		plotRect.width = plotWidth
+		plotRect.height = plotHeight
+		
+		boundsRect.width = w
+		boundsRect.height = h
+		}
+	
+	void Graph:setAxes(dec x, dec y)
+		{
+		xMax = x
+		yMax = y
+		
+		//recalculate all previous integer x/y positions...
+		for (int i = 0; i < series.arrayLength; i++)
+			{
+			for (int j = 0; j < series[i].points.arrayLength; j++)
+				{
+				dec yPos = (series[i].points[j].y / yMax) * plotHeight
+				dec xPos = (series[i].points[j].x / xMax) * plotWidth
+				
+				series[i].points[j].ix = xPos
+				series[i].points[j].iy = plotHeight - yPos
+				}
+			}
+		}
+	
+	void Graph:setScrollX(bool v)
+		{
+		plotWidth = 100000
+		xMax = 100000.0
+		}
+	
+	void Graph:addSeries(int ID, Color color)
+		{
+		series = new Series[](series, new Series(ID, color))
+		}
+	
+	void Graph:addPoint(int seriesID, dec x, dec y)
+		{
+		for (int i = 0; i < series.arrayLength; i++)
+			{
+			if (series[i].ID == seriesID)
+				{
+				//calculate the integer x/y position of this point
+				dec yPos = (y / yMax) * plotHeight
+				dec xPos = (x / xMax) * plotWidth
+				
+				series[i].points = new XYD[](series[i].points, new XYD(x, y, xPos, plotHeight - yPos))
+				
+				if (xPos > highestX)
+					{
+					highestX = xPos
+					
+					if (highestX > plotWidth + xScroll)
+						{
+						xScroll = highestX - plotWidth
+						}
+					}
+				
+				break
+				}
+			}
+		
+		postRepaint()
+		}
+	
+	void Graph:paint(Canvas c)
+		{
+		//background
+		c.drawRect(new Rect2D(xPosition, yPosition, width, height, background))
+		
+		//draw the chart plotting area, which should be a surface for clipping and scrolling...
+		c.pushSurface(plotRect, xScroll, 0, 255)
+		
+		for (int i = 0; i < series.arrayLength; i++)
+			{
+			for (int j = series[i].firstPointIndex; j < series[i].points.arrayLength; j++)
+				{
+				c.drawPoint(new Point2D(series[i].points[j].ix, series[i].points[j].iy, series[i].color))
+				
+				if (offScaleMarkers && series[i].points[j].iy > plotHeight)
+					{
+					//draw a marker
+					c.drawLine(new Line2D(series[i].points[j].ix, 0, series[i].points[j].ix, 5, series[i].color))
+					}
+				
+				if (series[i].points[j].ix < xScroll)
+					{
+					series[i].firstPointIndex = j
+					}
+				
+				if (j != 0)
+					{
+					c.drawLine(new Line2D(series[i].points[j-1].ix, series[i].points[j-1].iy, series[i].points[j].ix, series[i].points[j].iy, series[i].color))
+					}
+				}
+			}
+		
+		c.popSurface()
+		
+		//axes
+		c.drawLine(new Line2D(xPosition+BORDER_SIZE, yPosition+BORDER_SIZE, xPosition+BORDER_SIZE, yPosition + height - BORDER_SIZE, axisColor))
+		c.drawLine(new Line2D(xPosition+BORDER_SIZE, yPosition + height - BORDER_SIZE, xPosition+width-BORDER_SIZE, yPosition + height - BORDER_SIZE, axisColor))
+		}
+	
+	void Graph:click(int button, int x, int y)
+		{
+		emitevent click()
+		}
+	
+	void Graph:setPosition(int x, int y)
+		{
+		xPosition = x
+		yPosition = y
+		
+		plotRect.x = x + BORDER_SIZE
+		plotRect.y = y + BORDER_SIZE
+		
+		boundsRect.x = x
+		boundsRect.y = y
+		}
+	
+	Point Graph:getPosition()
+		{
+		return null
+		}
+	
+	WH Graph:getPreferredSize()
+		{
+		return null
+		}
+	
+	void Graph:mouseOver()
+		{
+		//TODO: not implemented yet in Window ???
+		//out.println("arkan")
+		background = backgroundOver
+		hover = true
+		postRepaint()
+		}
+	
+	void Graph:mouseOut()
+		{
+		background = backgroundOff
+		hover = false
+		postRepaint()
+		}
+	
+	void Graph:setBackground(Color c)
+		{
+		backgroundOff = c
+		if (hover) background = backgroundOver
+			else background = backgroundOff
+		postRepaint()
+		}
+	
+	void Graph:setHighlight(Color c)
+		{
+		backgroundOver = c
+		if (hover) background = backgroundOver
+			else background = backgroundOff
+		postRepaint()
+		}
+	
+	void Graph:postRepaint()
+		{
+		emitevent repaint()
+		}
+	
+	Rect Graph:getBounds()
+		{
+		return boundsRect
+		}
+	
+	}

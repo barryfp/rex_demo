@@ -1,0 +1,82 @@
+const int BUCKET_COUNT = 128
+
+data HashBucket {
+	CachedResponse values
+	}
+
+component provides cache.CacheHandler requires io.Output out, data.IntUtil iu {
+	
+	HashBucket buckets[] = new HashBucket[BUCKET_COUNT]
+	Mutex cacheLock = new Mutex()
+	
+	int hash(char key[])
+		{
+		int r = 1
+		for (int i = 0; i < key.arrayLength; i = i + 1)
+			r = r * key[i]
+		
+		return r % BUCKET_COUNT
+		}
+	
+	void put(CachedResponse value)
+		{
+		int h = hash(value.resource)
+		
+		if (buckets[h] == null)
+			buckets[h] = new HashBucket()
+		
+		value.next = buckets[h].values
+		buckets[h].values = value
+		}
+	
+	CachedResponse get(char key[])
+		{
+		int h = hash(key)
+		
+		HashBucket hb = buckets[h]
+		
+		if (hb != null)
+			{
+			CachedResponse cr = hb.values
+			while (cr != null)
+				{
+				if (cr.resource == key)
+					return cr
+				
+				cr = cr.next
+				}
+			}
+		
+		return null
+		}
+
+	CachedResponse CacheHandler:getCachedResponse(char resource[]) {
+		return get(resource)
+	}
+	
+	void CacheHandler:updateCache(CachedResponse ncr) {
+	
+		mutex(cacheLock) {
+			
+			CachedResponse tmp
+			if ((tmp = get(ncr.resource)) != null)
+				{
+				tmp.response = ncr.response
+				tmp.resourceAge = ncr.resourceAge
+				}
+				else
+				{
+				put(clone ncr)
+				}
+		}
+	}
+
+	void CacheHandler:clearCache() {
+		mutex(cacheLock) {
+			for (int i = 0; i < BUCKET_COUNT; i++)
+				{
+				buckets[i] = null
+				}
+		}
+	}
+}

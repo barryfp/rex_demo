@@ -1,0 +1,27 @@
+uses data.String
+
+data RLData {
+	//what next action is being taken
+	int nextAction
+	//is current environment
+	bool current
+	}
+
+data RLInput {
+	char name[]
+	dec val
+	}
+
+interface RL {
+	
+	void setActions(String actions[])
+	
+	RLData[] consumeData(RLInput environment[], RLInput reward[])
+	
+	int[] getTopActions(int forState, int n)
+	
+	int getAction()
+	
+	int getState()
+	
+	}
