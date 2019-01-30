@@ -87,7 +87,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		
 		TCPSocket s = new TCPSocket()
 		
-		if (s.connect(SERVER_ADDRESS, SERVER_PORT))
+		if (s.connect(ipAddr, SERVER_PORT))
 			{
 			s.send(req)
 			
