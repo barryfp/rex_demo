@@ -13,6 +13,8 @@ const int WORK_RATE = 50
 
 component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox {
 	
+	char ipAddr[] = SERVER_ADDRESS
+	
 	int BUTTON_WIDTH = 300
 	int BUTTON_HEIGHT = 300
 	
@@ -195,6 +197,9 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 	int App:main(AppParam params[])
 		{
 		//enumerate the workloads in the directory, make an on-screen button for each one
+		
+		if (params.arrayLength > 0)
+			ipAddr = params[0].string
 		
 		window = new Window("Client control")
 		

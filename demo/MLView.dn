@@ -51,6 +51,8 @@ data ColorMap {
 
 component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ml.RL learner, io.TextFile, data.query.Search find {
 	
+	char serverIP[] = DEFAULT_SERVER_IP
+	
 	bool testMode// = true
 	
 	Window window
@@ -170,7 +172,7 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 			
 			if (!testMode)
 				{
-				HTTPResponse r = request.get("http://$DEFAULT_SERVER_IP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
+				HTTPResponse r = request.get("http://$serverIP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
 				char response[] = r.content
 				
 				doc = parser.parseDocument(response)
@@ -463,6 +465,9 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 	
 	int App:main(AppParam params[])
 		{
+		if (params.arrayLength > 0)
+			serverIP = params[0].string
+		
 		window = new Window("PAL Command")
 		
 		window.setFullScreen(true)
@@ -475,7 +480,7 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 		
 		if (!testMode)
 			{
-			restAPI = new RestAPI(DEFAULT_SERVER_IP, DEFAULT_SERVER_PORT)
+			restAPI = new RestAPI(serverIP, DEFAULT_SERVER_PORT)
 			
 			if (restAPI == null)
 				{
