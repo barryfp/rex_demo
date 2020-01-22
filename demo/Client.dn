@@ -1,8 +1,7 @@
-uses events.EventData
 uses data.String
 
 //const char SERVER_ADDRESS[] = "localhost"
-const char SERVER_ADDRESS[] = "192.168.1.2"
+const char SERVER_ADDRESS[] = "148.88.227.162"
 const int SERVER_PORT = 8080
 
 const int RECV_BUF_SIZE = 512
@@ -14,6 +13,7 @@ const int WORK_RATE = 50
 component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox {
 	
 	char ipAddr[] = SERVER_ADDRESS
+	int usePort = SERVER_PORT
 	
 	int BUTTON_WIDTH = 300
 	int BUTTON_HEIGHT = 300
@@ -135,7 +135,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 	
 	void loadWorkload(int index)
 		{
-		File fd = new File(workloads[index].string, File.FILE_ACCESS_READ)
+		File fd = new File(workloads[index].string, File.READ)
 		
 		if (fd != null)
 			{
@@ -199,7 +199,17 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		//enumerate the workloads in the directory, make an on-screen button for each one
 		
 		if (params.arrayLength > 0)
+			{
 			ipAddr = params[0].string
+			}
+		
+		if (ipAddr.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(ipAddr, ":")
+			
+			ipAddr = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
 		
 		window = new Window("Client control")
 		

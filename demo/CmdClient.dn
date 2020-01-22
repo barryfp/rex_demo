@@ -1,0 +1,137 @@
+uses data.String
+
+//const char SERVER_ADDRESS[] = "localhost"
+const char SERVER_ADDRESS[] = "148.88.227.162"
+const int SERVER_PORT = 8080
+
+const int RECV_BUF_SIZE = 512
+
+const int BUTTON_HP = 35
+
+const int WORK_RATE = 50
+
+component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox {
+	
+	char ipAddr[] = SERVER_ADDRESS
+	int usePort = SERVER_PORT
+	
+	int BUTTON_WIDTH = 300
+	int BUTTON_HEIGHT = 300
+	
+	Window window
+	
+	Button closeButton
+	
+	CheckBox onSwitch
+	
+	//list of available files
+	String workloads[]
+	//current list of requests
+	String currentWorkload[]
+	//next list of requests, if any, to swap to
+	String nextWorkload[]
+	//UI of workloads
+	BigButton buttons[]
+	//index of current workload
+	int wkIndex
+	
+	Thread workerThread
+	bool workActive
+	
+	Mutex wkLock = new Mutex()
+	
+	void makeRequest(char path[])
+		{
+		char req[] = new char[]("GET ", path, " HTTP/1.1\r\n\r\n")
+		
+		TCPSocket s = new TCPSocket()
+			
+		if (s.connect(ipAddr, usePort))
+			{
+			s.send(req)
+			
+			out.println("req-sent to '$ipAddr':'$usePort'")
+			
+			int totalReceived = 0
+			byte resp[]
+			char total[] = null
+			while ((resp = s.recv(RECV_BUF_SIZE)).arrayLength > 0)
+				{
+				totalReceived += resp.arrayLength
+				total = new char[](total, resp)
+				}
+			
+			s.disconnect()
+			
+			//out.println("reply: $total -- $totalReceived")
+			}
+		}
+	
+	void clientThread()
+		{
+		int ndx
+		while (workActive)
+			{
+			mutex(wkLock)
+				{
+				if (nextWorkload != null)
+					{
+					ndx = 0
+					currentWorkload = nextWorkload
+					nextWorkload = null
+					}
+				}
+			
+			if (currentWorkload != null)
+				{
+				makeRequest(currentWorkload[ndx].string)
+				
+				ndx ++
+				
+				if (ndx >= currentWorkload.arrayLength)
+					{
+					ndx = 0
+					}
+				}
+			
+			timer.sleep(WORK_RATE)
+			}
+		}
+	
+	int App:main(AppParam params[])
+		{
+		//enumerate the workloads in the directory, make an on-screen button for each one
+		
+		if (params.arrayLength > 0)
+			{
+			ipAddr = params[0].string
+			}
+		
+		if (ipAddr.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(ipAddr, ":")
+			
+			ipAddr = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
+		
+		char wload[] = params[1].string
+		
+		File fd = new File(wload, File.READ)
+		
+		char content[] = fd.read(fd.getSize())
+		
+		fd.close()
+		
+		workActive = true
+		
+		nextWorkload = stringUtil.explode(content, "\r\n")
+		
+		workerThread = asynch::clientThread()
+		
+		workerThread.join()
+		
+		return 0
+		}
+	
+	}

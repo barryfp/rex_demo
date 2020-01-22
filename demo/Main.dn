@@ -2,7 +2,6 @@
 //ALSO: consider some kind of "unchanged graphics caching" to avoid the performance hit of multiple graphs, and all the text labels...
 //BUG: we don't re-render the window contents for a full-screen window that gets alt-tabbed away and back??
 
-uses events.EventData
 uses data.String
 
 const char DEFAULT_SERVER_IP[] = "192.168.1.2"
@@ -26,6 +25,7 @@ data EnvMap {
 component provides App requires io.Output out, data.IntUtil iu, data.DecUtil du, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ui.BigLabel {
 	
 	char serverIP[] = DEFAULT_SERVER_IP
+	int usePort = DEFAULT_SERVER_PORT
 	
 	bool testMode// = true
 	
@@ -73,7 +73,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.DecUtil du,
 			
 			if (!testMode)
 				{
-				HTTPResponse r = request.get("http://$serverIP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
+				HTTPResponse r = request.get("http://$serverIP:$(iu.intToString(usePort))/meta/get_perception", null)
 				char response[] = r.content
 				
 				doc = parser.parseDocument(response)
@@ -365,7 +365,17 @@ component provides App requires io.Output out, data.IntUtil iu, data.DecUtil du,
 	int App:main(AppParam params[])
 		{
 		if (params.arrayLength > 0)
+			{
 			serverIP = params[0].string
+			}
+		
+		if (serverIP.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(serverIP, ":")
+			
+			serverIP = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
 		
 		window = new Window("PAL Command")
 		
@@ -379,7 +389,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.DecUtil du,
 		
 		if (!testMode)
 			{
-			restAPI = new RestAPI(serverIP, DEFAULT_SERVER_PORT)
+			restAPI = new RestAPI(serverIP, usePort)
 			
 			if (restAPI == null)
 				{

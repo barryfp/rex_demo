@@ -1,4 +1,3 @@
-uses events.EventData
 uses data.String
 
 //const char DEFAULT_SERVER_IP[] = "localhost"
@@ -52,6 +51,7 @@ data ColorMap {
 component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ml.RL learner, io.TextFile, data.query.Search find {
 	
 	char serverIP[] = DEFAULT_SERVER_IP
+	int usePort = DEFAULT_SERVER_PORT
 	
 	bool testMode// = true
 	
@@ -172,7 +172,7 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 			
 			if (!testMode)
 				{
-				HTTPResponse r = request.get("http://$serverIP:$(iu.intToString(DEFAULT_SERVER_PORT))/meta/get_perception", null)
+				HTTPResponse r = request.get("http://$serverIP:$(iu.intToString(usePort))/meta/get_perception", null)
 				char response[] = r.content
 				
 				doc = parser.parseDocument(response)
@@ -399,6 +399,9 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 			Graph g = new Graph()
 			g.setSize(GRAPH_WIDTH, GRAPH_HEIGHT)
 			
+			g.setBackground(graphBackgroundOff)
+			g.setHighlight(graphBackgroundOff)
+			
 			//g.setPosition(nextX, nextY)
 			g.setAxes(15.0, 5.0)
 			
@@ -466,7 +469,17 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 	int App:main(AppParam params[])
 		{
 		if (params.arrayLength > 0)
+			{
 			serverIP = params[0].string
+			}
+		
+		if (serverIP.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(serverIP, ":")
+			
+			serverIP = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
 		
 		window = new Window("PAL Command")
 		
@@ -480,7 +493,7 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 		
 		if (!testMode)
 			{
-			restAPI = new RestAPI(serverIP, DEFAULT_SERVER_PORT)
+			restAPI = new RestAPI(serverIP, usePort)
 			
 			if (restAPI == null)
 				{
