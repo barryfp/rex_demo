@@ -10,7 +10,7 @@ const int BUTTON_HP = 35
 
 const int WORK_RATE = 50
 
-component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox {
+component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox, ui.Label {
 	
 	char ipAddr[] = SERVER_ADDRESS
 	int usePort = SERVER_PORT
@@ -37,6 +37,8 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 	
 	Thread workerThread
 	bool workActive
+	
+	Label statusLabel
 	
 	Mutex wkLock = new Mutex()
 	
@@ -87,7 +89,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		
 		TCPSocket s = new TCPSocket()
 		
-		if (s.connect(ipAddr, SERVER_PORT))
+		if (s.connect(ipAddr, usePort))
 			{
 			s.send(req)
 			
@@ -99,6 +101,10 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 				}
 			
 			s.disconnect()
+			}
+			else
+			{
+			statusLabel.setText("ERROR:: failed to connect to remote host '$ipAddr:$usePort'")
 			}
 		}
 	
@@ -227,6 +233,11 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		onSwitch.setTextColor(new Color(255, 255, 255, 255))
 		sinkevent UIEvents(onSwitch)
 		window.addObject(onSwitch)
+		
+		statusLabel = new Label("", "SourceSansPro.ttf", 15)
+		statusLabel.setPosition(150, 12)
+		statusLabel.setColor(new Color(255, 255, 255, 255))
+		window.addObject(statusLabel)
 		
 		loadWorkloads()
 		loadWorkload(0)
