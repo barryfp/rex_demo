@@ -48,7 +48,7 @@ data ColorMap {
 	Color color
 	}
 
-component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ml.RL learner, io.TextFile, data.query.Search find {
+component provides App requires io.Output out, data.IntUtil iu, ui.IOLayer coreui, ui.Window, ui.Button, ui.Panel, ui.Graph, time.Timer timer, util.RandomInt random, pal.control.RestAPI, data.json.JSONParser parser, net.http.HTTPRequest request, ui.Label, data.StringUtil stringUtil, ml.RL learner, io.TextFile, data.query.Search find {
 	
 	char serverIP[] = DEFAULT_SERVER_IP
 	int usePort = DEFAULT_SERVER_PORT
@@ -311,9 +311,10 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 	//handling user input events
 	eventsink UIEvents(EventData ed)
 		{
-		if (ed.source == closeButton && ed.type == Button.[click])
+		if (ed.source === closeButton && ed.type == Button.[click])
 			{
 			window.close()
+			coreui.shutdown()
 			}
 		}
 	
@@ -466,21 +467,16 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 			}
 		}
 	
-	int App:main(AppParam params[])
+	eventsink PlatformEvents(EventData ed)
 		{
-		if (params.arrayLength > 0)
+		if (ed.source === coreui && ed.type == IOLayer.[ready])
 			{
-			serverIP = params[0].string
+			startApp()
 			}
-		
-		if (serverIP.find(":") != StringUtil.NOT_FOUND)
-			{
-			String parts[] = stringUtil.explode(serverIP, ":")
-			
-			serverIP = parts[0].string
-			usePort = iu.intFromString(parts[1].string)
-			}
-		
+		}
+	
+	void startApp()
+		{
 		window = new Window("PAL Command")
 		
 		window.setFullScreen(true)
@@ -533,7 +529,28 @@ component provides App requires io.Output out, data.IntUtil iu, ui.Window, ui.Bu
 		asynch::timeLoop()
 		
 		window.setVisible(true)
-		window.waitForClose()
+		}
+	
+	int App:main(AppParam params[])
+		{
+		if (params.arrayLength > 0)
+			{
+			serverIP = params[0].string
+			}
+		
+		if (serverIP.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(serverIP, ":")
+			
+			serverIP = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
+		
+		sinkevent PlatformEvents(coreui)
+		
+		coreui.init()
+		
+		coreui.run()
 		
 		return 0
 		}

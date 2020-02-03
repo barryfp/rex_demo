@@ -10,7 +10,7 @@ const int BUTTON_HP = 35
 
 const int WORK_RATE = 50
 
-component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox, ui.Label {
+component provides App requires io.Output out, data.IntUtil iu, data.StringUtil stringUtil, ui.IOLayer coreui, ui.Window, ui.Button, net.TCPSocket, io.File, io.FileSystem fileSystem, time.Timer timer, ui.BigButton, ui.CheckBox, ui.Label {
 	
 	char ipAddr[] = SERVER_ADDRESS
 	int usePort = SERVER_PORT
@@ -47,6 +47,7 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		if (ed.source === closeButton && ed.type == Button.[click])
 			{
 			window.close()
+			coreui.shutdown()
 			}
 			else if (ed.source === onSwitch && ed.type == Button.[click])
 			{
@@ -200,23 +201,16 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 			}
 		}
 	
-	int App:main(AppParam params[])
+	eventsink PlatformEvents(EventData ed)
 		{
-		//enumerate the workloads in the directory, make an on-screen button for each one
-		
-		if (params.arrayLength > 0)
+		if (ed.source == coreui && ed.type == IOLayer.[ready])
 			{
-			ipAddr = params[0].string
+			startApp()
 			}
-		
-		if (ipAddr.find(":") != StringUtil.NOT_FOUND)
-			{
-			String parts[] = stringUtil.explode(ipAddr, ":")
-			
-			ipAddr = parts[0].string
-			usePort = iu.intFromString(parts[1].string)
-			}
-		
+		}
+	
+	void startApp()
+		{
 		window = new Window("Client control")
 		
 		window.setFullScreen(true)
@@ -243,7 +237,30 @@ component provides App requires io.Output out, data.IntUtil iu, data.StringUtil 
 		loadWorkload(0)
 		
 		window.setVisible(true)
-		window.waitForClose()
+		}
+	
+	int App:main(AppParam params[])
+		{
+		//enumerate the workloads in the directory, make an on-screen button for each one
+		
+		if (params.arrayLength > 0)
+			{
+			ipAddr = params[0].string
+			}
+		
+		if (ipAddr.find(":") != StringUtil.NOT_FOUND)
+			{
+			String parts[] = stringUtil.explode(ipAddr, ":")
+			
+			ipAddr = parts[0].string
+			usePort = iu.intFromString(parts[1].string)
+			}
+		
+		sinkevent PlatformEvents(coreui)
+		
+		coreui.init()
+		
+		coreui.run()
 		
 		return 0
 		}
